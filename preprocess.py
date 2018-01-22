@@ -21,29 +21,17 @@ def noteHandler(timestep):
 
 
 s = converter.parse('MIDI/20th.mid')
-print(s.__class__)
-
-#Stream
-data = s.parts
-print(len(data))
-
-#data.show('text')
-
-
 s2 = instrument.partitionByInstrument(s)
 #s2 = instrument.unbundleInstruments(s)
-
 
 for p in s2.parts:
     unused = p.makeRests(fillGaps=True, inPlace=True)
 
 #s2.show('text')
+l = []
 for i in s2:
+    instrument = []
     for timestep in i:
-        l = []
-        l.append(noteHandler(timestep))
+        instrument.append(noteHandler(timestep))
+    l.append(instrument)
     print(l)
-
-# Print out ID from stream
-#for p in partStream:
-#    print(p.id)

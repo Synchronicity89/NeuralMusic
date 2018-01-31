@@ -40,46 +40,49 @@ def printAllInfo(mid):
             print(msg)
 
 def processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize):
+    '''For note_on: Add to notesNotCompleted list and add matrix to finalMatrix'''
     if (msg.type is 'note_on'):
         b = np.zeros(shape=(1, 130))
         b.itemset((0, msg.note), 1)
-        newMatrix = np.concatenate([finalMatrix, b])
         notesNotCompleted.append(msg.note)
+        if (finalMatrix is None):
+            newMatrix = b
+        else:
+            newMatrix = np.concatenate([finalMatrix, b])
         return newMatrix, notesNotCompleted
+    '''For note_off: Remove from notesNotCompleted list'''
     if (msg.type is 'note_off'):
         for index, note in enumerate(notesNotCompleted):
             if (msg.note == note):
                 del notesNotCompleted[index]
-                #return finalMatrix, notesNotCompleted
-        if (msg.time > 0):
-            check = msg.time - timestepSize
-            if(check == 0):
-                finalMatrix = insertEmpty(finalMatrix)
-            else:
-                while (check != 0):
-                    finalMatrix = insertEmpty(finalMatrix)
-                    check = check - timestepSize
     return finalMatrix, notesNotCompleted
 
 def insertEmpty(finalMatrix):
     b = np.zeros(shape=(1, 130))
-    b.itemset((0, 128), 1) #pause note
+    b.itemset((0, 128), 1) #can not concatenate with zero matrix
+    newMatrix = np.concatenate([finalMatrix, b])
+    newMatrix.itemset((len(newMatrix)-1, 128), 0) #change back to zero matrix
+    return newMatrix
+
+def insertPause(finalMatrix):
+    b = np.zeros(shape=(1, 130))
+    b.itemset((0, 128), 1) #can not concatenate with zero matrix
     newMatrix = np.concatenate([finalMatrix, b])
     return newMatrix
 
-def updateHoldNotes(finalMatrix, notesNotCompleted, timestep):
-    for note in notesNotCompleted:
-        finalMatrix.itemset((timestep, note), 1) # set note to hold
-        finalMatrix.itemset((timestep, 129), 1) # set hold flag
-    return finalMatrix
-
+def insertHold(finalMatrix, note):
+    b = np.zeros(shape=(1, 130))
+    b.itemset((0, note), 1)
+    b.itemset((0, 129), 1) #can not concatenate with zero matrix
+    newMatrix = np.concatenate([finalMatrix, b])
+    return newMatrix
 
 def preprocessMIDITrack(track):
     notesNotCompleted = []
     timestepSize = 120
-
-    finalMatrix = np.zeros(shape=(1, 130))
+    finalMatrix = None
     currentTimestep = 0
+
     for i, msg in enumerate(track):
         if (msg.time == 0):
             finalMatrix, notesNotCompleted = processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize)
@@ -87,16 +90,23 @@ def preprocessMIDITrack(track):
             check = msg.time - timestepSize
             while (check != 0):
                 currentTimestep = currentTimestep + 1
-                finalMatrix = insertEmpty(finalMatrix)
+                for note in notesNotCompleted: # if notes are hold notes
+                    finalMatrix = insertHold(finalMatrix, note)
+                if not notesNotCompleted: # if pause
+                    finalMatrix = insertPause(finalMatrix)
                 check = check - timestepSize
             if (check == 0):
                 currentTimestep = currentTimestep + 1
                 finalMatrix, notesNotCompleted = processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize)
+                if (msg.type is 'note_off'):
+                    for note in notesNotCompleted: # if notes are hold notes
+                        finalMatrix = insertHold(finalMatrix, note)
+                    if not notesNotCompleted: # if pause
+                        finalMatrix = insertPause(finalMatrix)
             else:
                 print('Error: Timesteps do not add up')
-        #finalMatrix = updateHoldNotes(finalMatrix, notesNotCompleted, currentTimestep)
     print(finalMatrix)
-    print(finalMatrix.shape)
+    #print(finalMatrix.shape)
 
 t = getGuitarTracks(mid)
 preprocessMIDITrack(t[0])

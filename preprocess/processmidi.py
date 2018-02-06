@@ -2,7 +2,7 @@ import mido
 import numpy as np
 np.set_printoptions(threshold=np.nan)
 
-mid = mido.MidiFile('MIDI/littlered.mid')
+mid = mido.MidiFile('../MIDI/littlered.mid')
 print(mid.type)
 
 # Ranges where midi guitars and basses are
@@ -11,8 +11,6 @@ GUITAR_TRACKS = range(25, 33)
 
 TICKS_PER_BEAT_STANDARD = 480
 
-#Limits for quantisizing
-QUANTISIZE_LIMIT = 0.2
 
 ''' Gets bass tracks '''
 def getBassTracks(mid):
@@ -53,10 +51,10 @@ def createMIDITest(track):
         mid.tracks.append(track)
         mid.save('testsong.mid')
 
-def prepareMIDITrackForPreprocessing(track, dictionary):
+def prepareMIDITrackForPreprocessing(track, ticks_per_beat):
     for i, msg in enumerate(track):
         if (msg.type is 'note_on'):
-            quant = quantize(msg, dictionary)
+            quant = quantize(msg, ticks_per_beat)
             print(quant)
             if(msg.velocity == 0):
                 track[i] = mido.Message('note_off', note=msg.note, time=msg.time, channel=msg.channel)
@@ -75,28 +73,14 @@ def getTempo(mid):
 
 ''' ---- Preprocessing -----'''
 
-def setNoteDict(ticks_per_beat):
-    NOTE_DICT = {'1/1': 1920, '1/2': 960, '1/2t': 640, '1/4': 480, '1/4t': 320, '1/8': 240, '1/8t': 160, '1/16': 120}
-    for key, value in NOTE_DICT.items():
-        factor = ticks_per_beat/TICKS_PER_BEAT_STANDARD
-        newConstant = value * factor
-        newValue = range(int(newConstant - (newConstant * QUANTISIZE_LIMIT)), int(newConstant + (newConstant * QUANTISIZE_LIMIT))), newConstant
-        NOTE_DICT[key] = newValue
-    return NOTE_DICT
-
-
-def quantize(msg, NOTE_DICT):
-    lower_lim = NOTE_DICT['1/16'][0][0] # [Last element][Range in dict][Lowest value in range]
-    for key, value in NOTE_DICT.items():
-        if msg.time in value[0]:
-            return msg
-    if msg.time < lower_lim:
-        print("Fixing zero value: " + str(msg.time))
-        msg.time = 0
-        return msg
+def quantize(msg, ticks_per_beat):
+    factor = 120 / (TICKS_PER_BEAT_STANDARD/ticks_per_beat) # 120 is standard 16th note
+    mod = msg.time % factor
+    if (mod > (factor / 2)):
+        msg.time = int(msg.time + (factor - mod))
     else:
-        return msg
-
+        msg.time = int(msg.time - mod)
+    return msg
 
 def processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize):
     '''For note_on: Add to notesNotCompleted list and add matrix to finalMatrix'''
@@ -138,38 +122,40 @@ def insertHold(finalMatrix, note):
 
 def preprocessMIDITrack(track, ticks_per_beat):
     notesNotCompleted = []
-    timestepSize = TICKS_PER_BEAT_STANDARD * (ticks_per_beat/TICKS_PER_BEAT_STANDARD)
-    finalMatrix = None
+    timestepSize = 120 / (TICKS_PER_BEAT_STANDARD/ticks_per_beat)
+    finalMatrix = np.ones((1, 130))
     currentTimestep = 0
 
     for i, msg in enumerate(track):
-        if (msg.time == 0):
-            finalMatrix, notesNotCompleted = processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize)
-        else:
-            check = msg.time - timestepSize
-            while (check != 0):
-                currentTimestep = currentTimestep + 1
-                for note in notesNotCompleted: # if notes are hold notes
-                    finalMatrix = insertHold(finalMatrix, note)
-                if not notesNotCompleted: # if pause
-                    finalMatrix = insertPause(finalMatrix)
-                check = check - timestepSize
-            if (check == 0):
-                currentTimestep = currentTimestep + 1
+        print(msg)
+        if (msg.type == 'note_on' or msg.type == 'note_off'):
+            if (msg.time == 0):
                 finalMatrix, notesNotCompleted = processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize)
-                if (msg.type is 'note_off'):
-                    for note in notesNotCompleted: # if notes are hold notes
-                        finalMatrix = insertHold(finalMatrix, note)
-                    if not notesNotCompleted: # if pause
-                        finalMatrix = insertPause(finalMatrix)
             else:
-                print('Error: Timesteps do not add up')
+                check = msg.time - timestepSize
+                while (check != 0):
+                    currentTimestep = currentTimestep + 1
+                    if not finalMatrix.all():
+                        for note in notesNotCompleted: # if notes are hold notes
+                            finalMatrix = insertHold(finalMatrix, note)
+                        if not notesNotCompleted: # if pause
+                            finalMatrix = insertPause(finalMatrix)
+                    check = check - timestepSize
+                if (check == 0):
+                    currentTimestep = currentTimestep + 1
+                    finalMatrix, notesNotCompleted = processTimestep(msg, finalMatrix, notesNotCompleted, timestepSize)
+                    if (msg.type is 'note_off'):
+                        for note in notesNotCompleted: # if notes are hold notes
+                            finalMatrix = insertHold(finalMatrix, note)
+                        if not notesNotCompleted: # if pause
+                            finalMatrix = insertPause(finalMatrix)
+                else:
+                    print('Error: Timesteps do not add up')
     print(finalMatrix)
     print(finalMatrix.shape)
 
 
 t = getGuitarTracks(mid)
-dictionary = setNoteDict(mid.ticks_per_beat)
-#preprocessMIDITrack(t[0])
-track = prepareMIDITrackForPreprocessing(t[0], dictionary)
-createMIDITest(track)
+track = prepareMIDITrackForPreprocessing(t[0], mid.ticks_per_beat) # If noteoff = noteon with 0 velocity, fix this and quantize track
+preprocessMIDITrack(track, mid.ticks_per_beat)
+#createMIDITest(track)

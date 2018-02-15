@@ -85,10 +85,7 @@ def latent_loss(z_mean, z_stddev):
 
 if __name__ == '__main__':
     t0 = time.time()
-    mid = mido.MidiFile('../MIDI/littlered.mid')
-    t = pm.getGuitarTracks(mid)
-    track = pm.prepareMIDITrackForPreprocessing(t[0], mid.ticks_per_beat) # If noteoff = noteon with 0 velocity, fix this and quantize track
-    songdata = pm.preprocessMIDITrack(track, mid.ticks_per_beat)
+    songdata = np.loadtxt('littlered.txt')
     songdata = songdata[1:129]
 
     input_dim = 130 # 128 = 8 bars, 130 is midi notes, hold and pause
@@ -120,6 +117,6 @@ if __name__ == '__main__':
             l = loss.data[0]
         print(epoch, l)
     t1 = time.time()
+    print('Runtime: ' + str(t1-t0) + " seconds")
     plt.imshow(vae(inputs).data[0].numpy().reshape(1, 130), cmap='gray')
     plt.show(block=True)
-    print('Runtime: ' + str(t1-t0))

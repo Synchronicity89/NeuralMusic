@@ -12,6 +12,9 @@ GUITAR_TRACKS = range(25, 33)
 TICKS_PER_BEAT_STANDARD = 480
 
 
+
+'''----- Prepare track for preprocessing -----'''
+
 ''' Gets bass tracks '''
 def getBassTracks(mid):
     bassTracksFound = []
@@ -214,6 +217,10 @@ def preprocessMIDITrack(track, ticks_per_beat):
     return finalMatrix[1:len(finalMatrix)]
 
 
+def saveToTxt(array):
+    np.savetxt('littlered.txt', array)
+
+
 '''----- recreate song from neural network structure -------'''
 def noteOnMsg(noteIn, timeIn):
     return mido.Message('note_on', note=noteIn, time=timeIn, channel=1)
@@ -239,7 +246,8 @@ def recreateMIDI(array):
 t = getGuitarTracks(mid)
 track = prepareMIDITrackForPreprocessing(t[0], mid.ticks_per_beat) # If noteoff = noteon with 0 velocity, fix this and quantize track
 struct = preprocessMIDITrack(track, mid.ticks_per_beat)
+saveToTxt(struct)
 #print(printTrackInfo(track))
 #print(struct)
 #recreateMIDI(struct)
-createMIDITest(track)
+#createMIDITest(track)

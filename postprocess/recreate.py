@@ -18,58 +18,73 @@ class RecreateMIDI:
     def noteOffMsg(self, noteIn, timeIn):
         return mido.Message('note_off', note=noteIn, time=timeIn, channel=1)
 
-    def convertList(self, notesNotCompleted):
-        newList = []
-        for n in notesNotCompleted:
-            newList.append(n.note)
-        return newList
+    def endNotes(self, notesNotCompleted, timestep, song):
+        for i, note in enumerate(notesNotCompleted):
+            song.append(self.noteOffMsg(note.note, timestep))
+            del notesNotCompleted[i]
+            timestep = 0
+        return notesNotCompleted, timestep, song
 
-    def removeFromNotCompleted(self, notesNotCompleted, notesToDrop):
-        for note in notesToDrop:
-            for i, n in enumerate(notesNotCompleted):
-                if note == n.note:
-                    del notesNotCompleted[i]
-        return notesNotCompleted
+    def checkIfAHoldShouldEnd(self, notesNotCompleted, messageArray, timestep, song):
+        comparableList = []
+        for note in notesNotCompleted:
+            comparableList.append(note.note)
+        notesToBeEnded = set(comparableList) - set(messageArray)
+        if len(notesToBeEnded) > 0:
+            for note in notesToBeEnded:
+                song.append(self.noteOffMsg(note, timestep))
+                timestep = 0
+                for i, n in enumerate(notesNotCompleted):
+                    if n.note == note:
+                        del notesNotCompleted[i]
+        return notesNotCompleted, song, timestep
 
 
-    def recreateMIDI(self, array):
+    def recreateMIDI3(self, array):
         timefactor = 120
         pause = 128
         hold = 129
         song = []
         notesNotCompleted = []
-        timePast = 0;
+        timestep = 0
+        pauses = 0
 
         for x in array:
             messageArray = np.nonzero(x)[0]
-            for note in messageArray:
-                if(hold in messageArray): # Check if hold note
-                    for index, n in enumerate(notesNotCompleted):
-                        if (note == n.note and note != hold):
-                            n.time = n.time + timefactor
-                elif pause in messageArray:
-                    timePast = timePast + timefactor
-                    break
-                else:
-                    for index, n in enumerate(notesNotCompleted): # Check if note already exists in notes not complete. If so append to song and remove
-                        if (note == n.note):
-                            song.append(self.noteOffMsg(n.note, n.time))
-                            del notesNotCompleted[index]
-                            timePast = 0
-                    newNote = Note(note, timePast)
-                    notesNotCompleted.append(newNote)
-                    song.append(self.noteOnMsg(newNote.note, newNote.time))
-                    timePast = timePast + timefactor
-            temp = self.convertList(notesNotCompleted)
-            notesNotToDrop = np.intersect1d(messageArray, temp)
-            notesToDrop = set(notesNotCompleted) - set(temp)
-            for note in notesToDrop:
-                song.append(self.noteOffMsg(note.note, note.time))
-            notesNotCompleted = self.removeFromNotCompleted(notesNotCompleted, notesNotToDrop)
+            if (hold in messageArray):
+                notesNotCompleted, song, timestep = self.checkIfAHoldShouldEnd(notesNotCompleted, messageArray, timestep, song)
+                timestep = timestep + timefactor
+            elif (pause in messageArray):
+                if len(notesNotCompleted) > 0:
+                    notesNotCompleted, timestep, song = self.endNotes(notesNotCompleted, timestep, song)
+                timestep = timestep + timefactor
+            else:
+                if len(notesNotCompleted) > 0:
+                    notesNotCompleted, timestep, song = self.endNotes(notesNotCompleted, timestep, song)
+                for msg in messageArray:
+                    note = Note(msg, timestep)
+                    song.append(self.noteOnMsg(note.note, note.time))
+                    notesNotCompleted.append(note)
+                    timestep = 0
+                timestep = timestep + timefactor
         for msg in song:
             print(msg)
+        return song
+
+    def addTrackHeader(self, track):
+        header = mido.Message('program_change', program=27, time=0)
+        return [header] + track
+
+    def createMIDITest(self, track):
+            mid = mido.MidiFile()
+            track = self.addTrackHeader(track)
+            mid.tracks.append(track)
+            mid.save('recreated.mid')
+
+
 
 if __name__ == '__main__':
     array = np.loadtxt("../neuralnetwork/testchord.txt")
     rec = RecreateMIDI()
-    rec.recreateMIDI(array)
+    track = rec.recreateMIDI3(array)
+    rec.createMIDITest(track)

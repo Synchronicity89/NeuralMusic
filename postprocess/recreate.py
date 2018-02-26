@@ -40,8 +40,7 @@ class RecreateMIDI:
         return notesNotCompleted, song, timestep
 
 
-    def recreateMIDI3(self, array):
-        timefactor = 120
+    def recreateMIDI(self, array, timefactor):
         pause = 128
         hold = 129
         song = []
@@ -75,16 +74,17 @@ class RecreateMIDI:
         header = mido.Message('program_change', program=27, time=0)
         return [header] + track
 
-    def createMIDITest(self, track):
+    def createMIDITest(self, track, filename):
             mid = mido.MidiFile()
             track = self.addTrackHeader(track)
             mid.tracks.append(track)
-            mid.save('recreated.mid')
+            mid.save(filename + '.mid')
 
 
 
 if __name__ == '__main__':
-    array = np.loadtxt("../neuralnetwork/testchord.txt")
-    rec = RecreateMIDI()
-    track = rec.recreateMIDI3(array)
-    rec.createMIDITest(track)
+    array = np.loadtxt("../neuralnetwork/littlered.txt")
+    print(array)
+    #rec = RecreateMIDI()
+    #track = rec.recreateMIDI(array, 30)
+    #rec.createMIDITest(track, 'recreated')

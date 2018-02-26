@@ -10,6 +10,10 @@ import matplotlib.pyplot as plt
 import processmidi as pm
 import mido
 import time
+import sys
+sys.path.insert(0, '../postprocess/')
+import recreate
+np.set_printoptions(threshold=np.nan)
 
 class Normal(object):
     def __init__(self, mu, sigma, log_sigma, v=None, r=None):
@@ -48,14 +52,14 @@ class Decoder(torch.nn.Module):
 
 
 class VAE(torch.nn.Module):
-    latent_dim = 8
+    latent_dim = 65
 
     def __init__(self, encoder, decoder):
         super(VAE, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self._enc_mu = torch.nn.Linear(100, 8)
-        self._enc_log_sigma = torch.nn.Linear(100, 8)
+        self._enc_mu = torch.nn.Linear(100, 65)
+        self._enc_log_sigma = torch.nn.Linear(100, 65)
 
     def _sample_latent(self, h_enc):
         """
@@ -74,6 +78,8 @@ class VAE(torch.nn.Module):
     def forward(self, state):
         h_enc = self.encoder(state)
         z = self._sample_latent(h_enc)
+        global zett
+        zett = z
         return self.decoder(z)
 
 
@@ -97,7 +103,7 @@ if __name__ == '__main__':
     print('Number of samples: ', len(songdata))
 
     encoder = Encoder(input_dim, 100, 100)
-    decoder = Decoder(8, 100, input_dim)
+    decoder = Decoder(65, 100, input_dim)
     vae = VAE(encoder, decoder)
 
     criterion = nn.MSELoss()
@@ -117,6 +123,30 @@ if __name__ == '__main__':
             l = loss.data[0]
         print(epoch, l)
     t1 = time.time()
+
+    sample = Variable(torch.randn(100, 65))
+    output = vae.decoder(sample)
+    song = None
+    for data in output:
+        value, index = torch.max(data, 0)
+        index = index.data[0]
+        b = np.zeros(shape=(1, 130))
+        if (index == 129):
+            topKValue, topKIndex = torch.topk(data, 2)
+            b.itemset((0, topKIndex.data[0]), 1)
+            b.itemset((0, topKIndex.data[1]), 1)
+        else:
+            b.itemset((0, index), 1)
+        if (song is None):
+            song = b
+        else:
+            song = np.concatenate([song, b])
+    print(song)
+    rec = recreate.RecreateMIDI()
+    track = rec.recreateMIDI(song, 30)
+    rec.createMIDITest(track, 'VAERecreated')
+
+
     print('Runtime: ' + str(t1-t0) + " seconds")
-    plt.imshow(vae(inputs).data[0].numpy().reshape(1, 130), cmap='gray')
-    plt.show(block=True)
+    #plt.imshow(vae(inputs).data[0].numpy().reshape(1, 130), cmap='gray')
+    #plt.show(block=True)

@@ -83,8 +83,8 @@ class RecreateMIDI:
 
 
 if __name__ == '__main__':
-    array = np.loadtxt("../neuralnetwork/littlered.txt")
-    print(array)
+    array = np.loadtxt("../neuralnetwork/bags_grove.txt")
+    #print(array)
     #rec = RecreateMIDI()
     #track = rec.recreateMIDI(array, 30)
-    #rec.createMIDITest(track, 'recreated')
+    #rec.createMIDITest(track, 'bags')

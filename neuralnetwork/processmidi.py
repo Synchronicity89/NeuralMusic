@@ -2,12 +2,12 @@ import mido
 import numpy as np
 np.set_printoptions(threshold=np.nan)
 
-mid = mido.MidiFile('../MIDI/littlered.mid')
+mid = mido.MidiFile('../MIDI/bags_groove_jh.mid')
 print(mid.type)
 
 # Ranges where midi guitars and basses are
 BASS_TRACKS = range(33, 41)
-GUITAR_TRACKS = range(25, 33)
+GUITAR_TRACKS = range(25, 33) 
 
 TICKS_PER_BEAT_STANDARD = 480
 
@@ -217,8 +217,8 @@ def preprocessMIDITrack(track, ticks_per_beat):
     return finalMatrix[1:len(finalMatrix)]
 
 
-def saveToTxt(array):
-    np.savetxt('littlered.txt', array)
+def saveToTxt(array, filename):
+    np.savetxt(filename + '.txt', array)
 
 
 '''----- recreate song from neural network structure -------'''
@@ -246,7 +246,7 @@ def recreateMIDI(array):
 t = getGuitarTracks(mid)
 track = prepareMIDITrackForPreprocessing(t[0], mid.ticks_per_beat) # If noteoff = noteon with 0 velocity, fix this and quantize track
 struct = preprocessMIDITrack(track, mid.ticks_per_beat)
-saveToTxt(struct)
+saveToTxt(struct, 'bags_grove')
 #print(printTrackInfo(track))
 #print(struct)
 #recreateMIDI(struct)

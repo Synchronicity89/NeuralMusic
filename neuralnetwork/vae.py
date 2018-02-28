@@ -32,34 +32,52 @@ class Normal(object):
 class Encoder(torch.nn.Module):
     def __init__(self, D_in, H, D_out):
         super(Encoder, self).__init__()
-        self.linear1 = torch.nn.Linear(D_in, H)
+        self.LSTM = torch.nn.LSTM(D_in, H, 1, batch_first=True)
+        self.linear1 = torch.nn.Linear(H, H)
         self.linear2 = torch.nn.Linear(H, D_out)
 
     def forward(self, x):
-        x = F.relu(self.linear1(x))
+        output, hn = self.LSTM(x, None)
+        #print(output)
+        #print(hn)
+        #exit()
+        x = F.relu(self.linear1(output))
         return F.relu(self.linear2(x))
 
 
 class Decoder(torch.nn.Module):
     def __init__(self, D_in, H, D_out):
         super(Decoder, self).__init__()
-        self.linear1 = torch.nn.Linear(D_in, H)
+        self.LSTM = torch.nn.LSTM(D_in, H, 1, batch_first=True)
+        self.linear1 = torch.nn.Linear(H,  H)
         self.linear2 = torch.nn.Linear(H, D_out)
 
-    def forward(self, x):
-        x = F.relu(self.linear1(x))
-        return F.relu(self.linear2(x))
+    def forward(self, prev, z, hidden):
+        #print("Decoder")
+        #print(z)
+        #exit()
+        inp = torch.cat((prev, z), dim=2)
+        #print(inp)
+        #print(hidden)
+        output, hn = self.LSTM(inp, hidden)
+        #print(hn)
+        #exit()
+        #print(hn)
+        #print(output)
+        #exit()
+        x = F.relu(self.linear1(output.squeeze(0)))
+        return F.relu(self.linear2(x)), hn
 
 
 class VAE(torch.nn.Module):
-    latent_dim = 65
+    latent_dim = 1
 
     def __init__(self, encoder, decoder):
         super(VAE, self).__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self._enc_mu = torch.nn.Linear(100, 65)
-        self._enc_log_sigma = torch.nn.Linear(100, 65)
+        self._enc_mu = torch.nn.Linear(100, 1)
+        self._enc_log_sigma = torch.nn.Linear(100, 1)
 
     def _sample_latent(self, h_enc):
         """
@@ -75,12 +93,36 @@ class VAE(torch.nn.Module):
 
         return mu + sigma * Variable(std_z, requires_grad=False)  # Reparameterization trick
 
-    def forward(self, state):
+    def forward(self, state, criterion):
         h_enc = self.encoder(state)
+        #print(h_enc)
+        #exit()
         z = self._sample_latent(h_enc)
-        global zett
-        zett = z
-        return self.decoder(z)
+        z = z.view(1, 1, 128)
+        output = Variable(torch.zeros(1, 1, 130))
+        num_notes = 128  # 128
+        song = None
+        hidden = (z, z)
+        temp_loss = None
+        for i in range(0, num_notes):
+            output, hidden = self.decoder(output, z, hidden)
+            state_i = state.squeeze(0)[i].view(1, 130)
+            if song is None:
+                song = output
+                temp_loss = criterion(output, state_i)
+            else:
+                song = torch.cat((song, output), dim=0)
+                temp_loss += criterion(output, state_i)
+                #print("################")
+                #print(state_i.topk(2))
+                #print(output.topk(2))
+                #exit()
+            output = state_i  # test teacher forcing
+            output = output.view(1, 1, 130)
+        #return song.view(1, 128, 130)
+        #exit()
+        return temp_loss/128
+        # expects 1x128x130
 
 
 def latent_loss(z_mean, z_stddev):
@@ -91,8 +133,8 @@ def latent_loss(z_mean, z_stddev):
 
 if __name__ == '__main__':
     t0 = time.time()
-    songdata = np.loadtxt('littlered.txt')
-    songdata = songdata[1:129]
+    songdata = np.loadtxt('bags_grove.txt')
+    songdata = [songdata[1:129]]
 
     input_dim = 130 # 128 = 8 bars, 130 is midi notes, hold and pause
     batch_size = 1
@@ -100,49 +142,76 @@ if __name__ == '__main__':
     dataloader = torch.utils.data.DataLoader(songdata, batch_size=batch_size,
                                              shuffle=False, num_workers=2)
 
+
     print('Number of samples: ', len(songdata))
 
     encoder = Encoder(input_dim, 100, 100)
-    decoder = Decoder(65, 100, input_dim)
+    decoder = Decoder(input_dim+128, 128, input_dim)
     vae = VAE(encoder, decoder)
 
     criterion = nn.MSELoss()
 
     optimizer = optim.Adam(vae.parameters(), lr=0.0001)
+    #optimizer = optim.Adam(vae.parameters(), lr=0.01)
     l = None
     for epoch in range(100):
         for i, data in enumerate(dataloader, 0):
             inputs = Variable(data).float()
             #inputs = Variable(inputs.resize_(batch_size, input_dim))
             optimizer.zero_grad()
-            dec = vae(inputs)
+            loss = vae(inputs, criterion)
             ll = latent_loss(vae.z_mean, vae.z_sigma)
-            loss = criterion(dec, inputs) + ll
+            loss = loss + ll # excluding ll for now
             loss.backward()
             optimizer.step()
             l = loss.data[0]
         print(epoch, l)
     t1 = time.time()
 
-    sample = Variable(torch.randn(100, 65))
-    output = vae.decoder(sample)
+    #exit()
+
+    sample = Variable(torch.randn(1, 1, 128))
+    output = Variable(torch.zeros(1, 1, 130))
+
+    song = None
+    hidden = (sample, sample)
+    for i in range(0, 128):
+        output, hidden = vae.decoder(output, sample, hidden)
+        if song is None:
+            song = output
+        else:
+            song = torch.cat((song, output), dim=0)
+        output = output.view(1, 1, 130)
+    #output = song.view(1, 128, 130)
+    output = song
+    #print(output)
+    #exit()
     song = None
     for data in output:
         value, index = torch.max(data, 0)
         index = index.data[0]
         b = np.zeros(shape=(1, 130))
+        """
         if (index == 129):
             topKValue, topKIndex = torch.topk(data, 2)
             b.itemset((0, topKIndex.data[0]), 1)
             b.itemset((0, topKIndex.data[1]), 1)
+        elif (index == 128):
+            topKValue, topKIndex = torch.topk(data, 2)
+            b.itemset((0, topKIndex.data[1]), 1)
         else:
             b.itemset((0, index), 1)
+            print(index)
+            #exit()
+        """
+        value = data.multinomial(1)
+        b.itemset((0, value.data[0]), 1)
         if (song is None):
             song = b
         else:
             song = np.concatenate([song, b])
-    print(song)
     rec = recreate.RecreateMIDI()
+    #print(song)
     track = rec.recreateMIDI(song, 30)
     rec.createMIDITest(track, 'VAERecreated')
 

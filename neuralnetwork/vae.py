@@ -12,6 +12,8 @@ import sys
 import os
 sys.path.insert(0, '../postprocess/')
 sys.path.insert(0, '../preprocess/')
+from encoder import Encoder
+from decoder import Decoder
 import recreate
 import processmidi as pm
 import progressbar
@@ -31,48 +33,7 @@ class Normal(object):
         self.r = r
 
 
-class Encoder(torch.nn.Module):
-    def __init__(self, D_in, H, D_out):
-        super(Encoder, self).__init__()
-        self.LSTM = torch.nn.LSTM(D_in, H, 1, batch_first=True)
-        self.linear1 = torch.nn.Linear(H, H)
-        self.linear2 = torch.nn.Linear(H, D_out)
-
-    def forward(self, x):
-        output, hn = self.LSTM(x, None)
-        #print(output)
-        #print(hn)
-        #exit()
-        x = F.relu(self.linear1(output))
-        return F.relu(self.linear2(x))
-
-
-class Decoder(torch.nn.Module):
-    def __init__(self, D_in, H, D_out):
-        super(Decoder, self).__init__()
-        self.LSTM = torch.nn.LSTM(D_in, H, 1, batch_first=True)
-        self.linear1 = torch.nn.Linear(H,  H)
-        self.linear2 = torch.nn.Linear(H, D_out)
-
-    def forward(self, prev, z, hidden):
-        #print("Decoder")
-        #print(z)
-        #exit()
-        inp = torch.cat((prev, z), dim=2)
-        #print(inp)
-        #print(hidden)
-        output, hn = self.LSTM(inp, hidden)
-        #print(hn)
-        #exit()
-        #print(hn)
-        #print(output)
-        #exit()
-        x = F.relu(self.linear1(output.squeeze(0)))
-        return F.relu(self.linear2(x)), hn
-
-
 class VAE(torch.nn.Module):
-
     def __init__(self, encoder, decoder, hidden_size, latent_dim, use_cuda):
         super(VAE, self).__init__()
         self.encoder = encoder
@@ -98,40 +59,37 @@ class VAE(torch.nn.Module):
 
         return mu + sigma * var  # Reparameterization trick
 
+    def reparameterize(self, mu, logvar):
+        if self.training:
+            std = logvar.mul(0.5).exp_()
+            eps = Variable(std.data.new(std.size()).normal_())
+            return eps.mul(std).add_(mu)
+        else:
+            return mu
+
     def forward(self, state, criterion, batch_size, input_dim, latent_dim, z_size, song_length):
         h_enc = self.encoder(state)
-        #print(state)
-        #exit()
-        #print(h_enc)
-        #exit()
         z = self._sample_latent(h_enc)
-        #print(z)
-        #exit()
-        z = z.view(batch_size, latent_dim, z_size) # Change the first 1 if more that one batch
+        #z = z.view(batch_size, latent_dim, z_size) # Change the first 1 if more that one batch
         output = Variable(torch.zeros(batch_size, 1, input_dim))
         output = output.cuda() if self.use_cuda else output
         song = None
-        hidden = (z, z)
         temp_loss = None
         for i in range(0, song_length):
-            output, hidden = self.decoder(output, z, hidden)
-            state_i = state.squeeze(0)[i].view(1, input_dim)
+            temp_z = z.squeeze(0)[i].view(1, 1, latent_dim)
+            if i == 0:
+                hidden = (temp_z, temp_z)
+            output, hidden = self.decoder(output, temp_z, hidden)
+            state_i = state.squeeze(0)[i].view(1, 1, input_dim)
             if song is None:
                 song = output
                 temp_loss = criterion(output, state_i)
             else:
                 song = torch.cat((song, output), dim=0)
                 temp_loss += criterion(output, state_i)
-                #print("################")
-                #print(state_i.topk(2))
-                #print(output.topk(2))
-                #exit()
             output = state_i  # test teacher forcing
             output = output.view(batch_size, 1, input_dim)
-        #return song.view(1, 128, 130)
-        #exit()
         return temp_loss/song_length
-        # expects 1x128x130
 
 
 def latent_loss(z_mean, z_stddev):
@@ -139,15 +97,22 @@ def latent_loss(z_mean, z_stddev):
     stddev_sq = z_stddev * z_stddev
     return 0.5 * torch.mean(mean_sq + stddev_sq - torch.log(stddev_sq) - 1)
 
-def loadData(directory):
+def loss_function(mu, logvar):
+    # see Appendix B from VAE paper:
+    # Kingma and Welling. Auto-Encoding Variational Bayes. ICLR, 2014
+    # https://arxiv.org/abs/1312.6114
+    # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+
+def loadData(directory, song_length):
     songdata = []
     i = 0
     with progressbar.ProgressBar(max_value=len(os.listdir(directory))) as bar:
         for filename in os.listdir(directory):
             if filename.endswith(".txt"):
                 currentSong = np.loadtxt(directory+'/'+filename)
-                if len(currentSong) > 128:
-                    currentSong = currentSong[1:129] # Making song shorter
+                if len(currentSong) >= song_length:
+                    currentSong = currentSong[0:song_length] # Making song shorter
                     songdata.append(currentSong)
                 i = i + 1
                 bar.update(i)
@@ -161,22 +126,22 @@ if __name__ == '__main__':
     use_cuda = torch.cuda.is_available()
     t0 = time.time()
     '''Input data config'''
-    directory = 'bluessolodata'
-    songdata = loadData(directory)
+    song_length = 256
+    directory = 'onesong'
+    songdata = loadData(directory, song_length)
 
     input_dim = 130 # 128 = 8 bars, 130 is midi notes, hold and pause
     batch_size = 1
-    song_length = 128
 
     dataloader = torch.utils.data.DataLoader(songdata, batch_size=batch_size,
                                              shuffle=False, num_workers=2)
     hidden_size = 100
-    z_size = 128
-    latent_dim = 1
+    z_size = 1
+    latent_dim = 30
 
     print('Number of samples: ', len(songdata))
     encoder = Encoder(input_dim, hidden_size, hidden_size)
-    decoder = Decoder(input_dim + z_size, z_size, input_dim)
+    decoder = Decoder(input_dim + latent_dim, latent_dim, input_dim)
     vae = VAE(encoder, decoder, hidden_size, latent_dim, use_cuda)
     criterion = nn.MSELoss()
     if use_cuda:
@@ -185,12 +150,13 @@ if __name__ == '__main__':
         vae.cuda()
         criterion.cuda()
 
-    optimizer = optim.Adam(vae.parameters(), lr=0.0001)
+    optimizer = optim.Adam(vae.parameters(), lr=0.0003)
     #optimizer = optim.Adam(vae.parameters(), lr=0.01)
     l = None
-    for epoch in range(100):
+    for epoch in range(10):
         with progressbar.ProgressBar(max_value=len(dataloader)) as bar:
             for i, data in enumerate(dataloader, 0):
+                #song_length = len(data[0])
                 if use_cuda:
                     data = data.cuda()
                 inputs = Variable(data).float()
@@ -199,7 +165,7 @@ if __name__ == '__main__':
                 optimizer.zero_grad()
                 loss = vae(inputs, criterion, batch_size, input_dim, latent_dim, z_size, song_length)
                 ll = latent_loss(vae.z_mean, vae.z_sigma)
-                loss = loss + ll # excluding ll for now
+                loss = loss + ll
                 loss.backward()
                 optimizer.step()
                 l = loss.data[0]
@@ -209,7 +175,7 @@ if __name__ == '__main__':
 
     #exit()
 
-    sample = Variable(torch.randn(batch_size, 1, 128))
+    sample = Variable(torch.randn(batch_size, 1, latent_dim))
     sample = sample.cuda() if use_cuda else sample
     #s = vae.encoder(Variable(torch.randn(1, 128, 130)))
     #sample = vae._sample_latent(s)
@@ -219,20 +185,26 @@ if __name__ == '__main__':
 
     song = None
     hidden = (sample, sample)
-    for i in range(0, 128):
+    for i in range(0, song_length):
         output, hidden = vae.decoder(output, sample, hidden)
         if song is None:
             song = output
         else:
-            song = torch.cat((song, output), dim=0)
+            print(output)
+            print(song)
+            song = torch.cat((song, output), dim=1)
         output = output.view(batch_size, 1, 130)
+    #print(song)
     #output = song.view(1, 128, 130)
-    output = song
-    song = None
-    for data in output:
+    #output = song
+    #song = None
+    song = song.squeeze(0)
+    for data in song:
         #value, index = torch.max(data, 0) This is highest probability
         #index = index.data[0]
         b = np.zeros(shape=(1, 130))
+        values, indices = data.max(0)
+        print(indices)
 
         '''Get highest probability'''
         '''
@@ -249,18 +221,22 @@ if __name__ == '__main__':
             #exit()
             '''
 
-        ''' Monte Carlo Sampling'''
+        ''' Multinnomial Sampling'''
+
+        '''
         value = data.multinomial(1)
-        if (value.data[0] == 129):
+        value = value.data[0][0]
+        if (value == 129):
             topKValue, topKIndex = torch.topk(data, 2)
-            if topKIndex.data[0] == 129:
-                valueToBeSet = topKIndex.data[1]
+            topKIndex = topKIndex.data[0]
+            if topKIndex[0] == 129:
+                valueToBeSet = topKIndex[1]
             else:
-                valueToBeSet = topKIndex.data[1]
-            b.itemset((0, value.data[0]), 1)
+                valueToBeSet = topKIndex[1]
+            b.itemset((0, value), 1)
             b.itemset((0, valueToBeSet), 1)
         else:
-            b.itemset((0, value.data[0]), 1)
+            b.itemset((0, value), 1)
         if (song is None):
             song = b
         else:
@@ -270,3 +246,4 @@ if __name__ == '__main__':
     track = rec.recreateMIDI(song, 30)
     rec.createMIDITest(track, 'VAERecreated')
     print('Runtime: ' + str(t1-t0) + " seconds")
+    '''

@@ -6,11 +6,11 @@ from selecttrack import SelectTrack
 from processmidi import ProcessMIDI
 import progressbar
 
-directory = '../Blues-Solo-MIDI'
+directory = '../Test-MIDI'
 tracksToPreprocess = []
 trackSelector = SelectTrack()
 TICKS_PER_BEAT_STANDARD = 480
-out_directory = '../neuralnetwork/bluessolodata'
+out_directory = '../neuralnetwork/onesong'
 
 '''Select tracks to preprocess'''
 success = 0

@@ -182,7 +182,6 @@ class ProcessMIDI:
         currentTimestep = 0
         forwardChordCheck = 3
         updateIndexWithFactor = 0
-
         for i, msg in enumerate(track):
             if updateIndexWithFactor != 0:
                 updateIndexWithFactor = updateIndexWithFactor - 1

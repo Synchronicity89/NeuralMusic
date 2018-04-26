@@ -20,18 +20,13 @@ class Decoder(torch.nn.Module):
         return F.relu(self.linear1(output)), hn
 '''
 
-class Decoder(torch.nn.Module):
-    def __init__(self, D_in, H, D_out):
-        super(Decoder, self).__init__()
-        self.LSTM = torch.nn.LSTM(D_in, H, num_layers=1, batch_first=True)
-        self.linear = torch.nn.Linear(H, D_out)
-        self.softmax = torch.nn.LogSoftmax(dim=2)
+class UpperLevelDecoder(torch.nn.Module):
+    def __init__(self, Z_in, H):
+        super(UpperLevelDecoder, self).__init__()
+        self.LSTM = torch.nn.LSTM(H, H, num_layers=1, batch_first=True)
+        self.linear = torch.nn.Linear(Z_in, H)
 
-    def forward(self, input, hidden, z):
-        #print(input)
-        #print(z)
-        #exit()
-        inp = torch.cat((input, z), dim=2)
-        output, hidden = self.LSTM(inp, hidden)
-        output = self.linear(output)
+    def forward(self, z):
+        output = self.linear(z)
+        output, hidden = self.LSTM(output, None)
         return output, hidden

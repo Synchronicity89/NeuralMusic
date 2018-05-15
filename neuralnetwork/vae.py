@@ -18,6 +18,8 @@ from upperleveldecoder import UpperLevelDecoder
 import recreate
 import processmidi as pm
 import progressbar
+from compare import Compare
+import math
 np.set_printoptions(threshold=np.nan)
 
 
@@ -109,29 +111,35 @@ def loss_function(mu, logvar):
     # 0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
-def loadData(directory, song_length):
+def loadData(directory):
     songdata = []
     i = 0
     with progressbar.ProgressBar(max_value=len(os.listdir(directory))) as bar:
         for filename in os.listdir(directory):
             if filename.endswith(".txt"):
                 currentSong = np.loadtxt(directory+'/'+filename)
-                if len(currentSong) >= song_length:
-                    currentSong = currentSong[0:song_length] # Making song shorter
-                    songdata.append(currentSong)
-                i = i + 1
-                bar.update(i)
+                newSong = []
+                if (len(currentSong > 0)):
+                    for timestep in currentSong:
+                        if (len(np.nonzero(timestep)) > 0):
+                            if (np.nonzero(timestep)[0][0] != 128):
+                                newSong.append(timestep)
+                    #currentSong = currentSong[0:song_length] # Making song shorter
+                    newSong = np.array(newSong)
+                    songdata.append(newSong)
+                    i = i + 1
+                    bar.update(i)
         return songdata
+
 
 
 if __name__ == '__main__':
     use_cuda = torch.cuda.is_available()
+    #torch.cuda.set_device(1)
     t0 = time.time()
     '''Input data config'''
-    song_length = 255
     directory = 'bluessolodata'
-    songdata = loadData(directory, song_length)
-
+    songdata = loadData(directory)
     input_dim = 130 # 128 = 8 bars, 130 is midi notes, hold and pause
     batch_size = 1
 
@@ -155,14 +163,15 @@ if __name__ == '__main__':
 
     #optimizer = optim.Adam(vae.parameters(), lr=0.0005)
     #optimizer = optim.Adam(vae.parameters(), lr=0.01)
-    optimizer = optim.Adam(vae.parameters(), lr=0.01)
+    learningRate = 0.0095
+    optimizer = optim.Adam(vae.parameters(), lr=learningRate)
     l = None
     songToProcess = None
     lastZ = None
-    for epoch in range(50):
+    for epoch in range(200):
         with progressbar.ProgressBar(max_value=len(dataloader)) as bar:
             for i, data in enumerate(dataloader, 0):
-                #song_length = len(data[0])
+                song_length = len(data[0])
                 if use_cuda:
                     data = data.cuda()
                 inputs = Variable(data).float()
@@ -178,6 +187,8 @@ if __name__ == '__main__':
                 bar.update(i)
                 songToProcess = data
         print(epoch, l)
+        learningRate = learningRate * math.exp(-0.01)
+        print('Updating learning rate: ' + str(learningRate))
     t1 = time.time()
 
     '''Generate from encoder/decoder directly'''
@@ -194,62 +205,88 @@ if __name__ == '__main__':
             song = torch.cat((song, output), dim=1)
         output = output.view(batch_size, 1, 130)'''
 
-
-    sample = Variable(torch.randn(batch_size, song_length, latent_dim))
-    sample = sample.cuda() if use_cuda else sample
+    samples = []
+    song_length = 256
+    s = Variable(torch.randn(batch_size, song_length, latent_dim))
+    s = s.cuda() if use_cuda else s
+    s1 = Variable(torch.zeros(batch_size, song_length, latent_dim))
+    s1 = s1.cuda() if use_cuda else s1
+    s2 = Variable(torch.ones(batch_size, song_length, latent_dim))
+    s2 = s2.cuda() if use_cuda else s2
+    samples.append(s)
+    samples.append(s1)
+    samples.append(s2)
     #s = vae.encoder(Variable(torch.randn(1, 128, 130)))
     #sample = vae._sample_latent(s)
     #sample = sample.view(1, 1, 128)
-    output = Variable(torch.zeros(batch_size, 1, 130))
-    output = output.cuda() if use_cuda else output
 
-    song = None
-    z_out, hidden = vae.upperleveldecoder(sample)
-    for i in range(0, song_length):
-        samplei = sample.squeeze(0)[i].view(1, 1, latent_dim)
-        output, hidden = vae.decoder(output, hidden, samplei)
-        if song is None:
-            song = output
-        else:
-            song = torch.cat((song, output), dim=1)
-        output = output.view(batch_size, 1, 130)
-    #print(song)
-    #output = song.view(1, 128, 130)
 
-    output = song.squeeze(0)
-    song = None
-    for data in output:
-        #value, index = torch.max(data, 0) This is highest probability
-        #index = index.data[0]
-        '''Highest probability'''
-        b = np.zeros(shape=(1, 130))
-        values, indices = data.max(0)
-        if (indices.data[0] == 129):
-            topKValue, topKIndex = torch.topk(data, 2)
-            b.itemset((0, topKIndex.data[0]), 1)
-            b.itemset((0, topKIndex.data[1]), 1)
-        if (len(indices.data) == 1):
-            b.itemset((0, indices.data[0]), 1)
-
-        ''' Multinnomial Sampling'''
-        '''value = data.multinomial(1)
-        if (value.data[0] == 129):
-            topKValue, topKIndex = torch.topk(data, 2)
-            if topKIndex.data[0] == 129:
-                valueToBeSet = topKIndex.data[1]
+    for number, sample in enumerate(samples):
+        song = None
+        output = Variable(torch.zeros(batch_size, 1, 130))
+        output = output.cuda() if use_cuda else output
+        z_out, hidden = vae.upperleveldecoder(sample)
+        for i in range(0, song_length):
+            samplei = sample.squeeze(0)[i].view(1, 1, latent_dim)
+            output, hidden = vae.decoder(output, hidden, samplei)
+            if song is None:
+                song = output
             else:
-                valueToBeSet = topKIndex.data[1]
-            b.itemset((0, value.data[0]), 1)
-            b.itemset((0, valueToBeSet), 1)
-        else:
-            b.itemset((0, value.data[0]), 1)'''
-        if (song is None):
-            song = b
-        else:
-            song = np.concatenate([song, b])
-    print(song)
-    rec = recreate.RecreateMIDI()
-    #print(song)
-    track = rec.recreateMIDI(song, 30)
-    rec.createMIDITest(track, 'VAERecreated')
+                song = torch.cat((song, output), dim=1)
+            output = output.view(batch_size, 1, 130)
+        #print(song)
+        #output = song.view(1, 128, 130)
+
+        output = song.squeeze(0)
+        song = None
+        prevNote = None
+        limit = 16
+        for data in output:
+            #value, index = torch.max(data, 0) This is highest probability
+            #index = index.data[0]
+            '''Highest probability'''
+            b = np.zeros(shape=(1, 130))
+            values, indices = data.max(0)
+            if (indices.data[0] == 129):
+                topKValue, topKIndex = torch.topk(data, 2)
+                if (prevNote is None or prevNote != topKIndex.data[1] or limit == 0):
+                    b.itemset((0, topKIndex.data[1]), 1)
+                    prevNote = topKIndex.data[1]
+                    limit = 16
+                else:
+                    b.itemset((0, topKIndex.data[0]), 1)
+                    b.itemset((0, topKIndex.data[1]), 1)
+                    limit = limit - 1
+                    prevNote = topKIndex.data[1]
+            else:
+                if (len(indices.data) == 1):
+                    b.itemset((0, indices.data[0]), 1)
+                    prevNote = indices.data[0]
+                    limit = 16
+
+            ''' Multinnomial Sampling'''
+            '''value = data.multinomial(1)
+            if (value.data[0] == 129):
+                topKValue, topKIndex = torch.topk(data, 2)
+                if topKIndex.data[0] == 129:
+                    valueToBeSet = topKIndex.data[1]
+                else:
+                    valueToBeSet = topKIndex.data[1]
+                b.itemset((0, value.data[0]), 1)
+                b.itemset((0, valueToBeSet), 1)
+            else:
+                b.itemset((0, value.data[0]), 1)'''
+            if (song is None):
+                song = b
+            else:
+                song = np.concatenate([song, b])
+        print(song)
+        rec = recreate.RecreateMIDI()
+        #print(song)
+        track = rec.recreateMIDI(song, 30)
+        rec.createMIDITest(track, 'VAERecreated'+str(number))
     print('Runtime: ' + str(t1-t0) + " seconds")
+
+    '''Compare solo with test data'''
+    comparator = Compare()
+    comparator.compareData(songdata, track)

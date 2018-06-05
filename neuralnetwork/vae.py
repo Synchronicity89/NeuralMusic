@@ -163,12 +163,15 @@ if __name__ == '__main__':
 
     #optimizer = optim.Adam(vae.parameters(), lr=0.0005)
     #optimizer = optim.Adam(vae.parameters(), lr=0.01)
-    learningRate = 0.0095
+    learningRate = 0.01
+    learningRateTitle = 0.01
+    numEpochs = 100
     optimizer = optim.Adam(vae.parameters(), lr=learningRate)
     l = None
     songToProcess = None
     lastZ = None
-    for epoch in range(200):
+    losses = []
+    for epoch in range(numEpochs):
         with progressbar.ProgressBar(max_value=len(dataloader)) as bar:
             for i, data in enumerate(dataloader, 0):
                 song_length = len(data[0])
@@ -187,6 +190,7 @@ if __name__ == '__main__':
                 bar.update(i)
                 songToProcess = data
         print(epoch, l)
+        losses.append(l)
         learningRate = learningRate * math.exp(-0.01)
         print('Updating learning rate: ' + str(learningRate))
     t1 = time.time()
@@ -206,12 +210,13 @@ if __name__ == '__main__':
         output = output.view(batch_size, 1, 130)'''
 
     samples = []
+    compareItems = []
     song_length = 256
     s = Variable(torch.randn(batch_size, song_length, latent_dim))
     s = s.cuda() if use_cuda else s
-    s1 = Variable(torch.zeros(batch_size, song_length, latent_dim))
+    s1 = Variable(torch.randn(batch_size, song_length, latent_dim))
     s1 = s1.cuda() if use_cuda else s1
-    s2 = Variable(torch.ones(batch_size, song_length, latent_dim))
+    s2 = Variable(torch.randn(batch_size, song_length, latent_dim))
     s2 = s2.cuda() if use_cuda else s2
     samples.append(s)
     samples.append(s1)
@@ -281,12 +286,18 @@ if __name__ == '__main__':
             else:
                 song = np.concatenate([song, b])
         print(song)
+        compareItems.append(song)
         rec = recreate.RecreateMIDI()
         #print(song)
         track = rec.recreateMIDI(song, 30)
-        rec.createMIDITest(track, 'VAERecreated'+str(number))
+        rec.createMIDITest(track, 'Recreated '+str(number) + ', ' + str(numEpochs) + ' epochs,' + ' learning rate = '+str(learningRateTitle))
     print('Runtime: ' + str(t1-t0) + " seconds")
 
     '''Compare solo with test data'''
+    file = open('results for ' + str(numEpochs) + ' epochs, ' + 'learning rate = ' + str(learningRateTitle) + '.txt' ,'w')
     comparator = Compare()
-    comparator.compareData(songdata, track)
+    for song in compareItems:
+        comparator.compareData(songdata, song, file)
+        file.write('\n')
+        file.write(str(losses) + '\n\n')
+    file.close()

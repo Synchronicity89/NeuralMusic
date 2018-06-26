@@ -28,9 +28,6 @@ class Decoder(torch.nn.Module):
         self.softmax = torch.nn.LogSoftmax(dim=2)
 
     def forward(self, input, hidden, z):
-        #print(input)
-        #print(z)
-        #exit()
         inp = torch.cat((input, z), dim=2)
         output, hidden = self.LSTM(inp, hidden)
         output = self.linear(output)

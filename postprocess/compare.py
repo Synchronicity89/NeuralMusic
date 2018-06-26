@@ -25,7 +25,7 @@ class Compare:
         for elem in similarity:
             if elem is True:
                 positives = positives + 1
-        return positives / len(similarity)
+        return (positives / len(similarity)) * 100
 
     def getTotalAverage(self, allTracksCompared):
         avg = 0

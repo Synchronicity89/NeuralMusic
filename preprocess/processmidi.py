@@ -220,13 +220,3 @@ class ProcessMIDI:
     '''----- recreate song from neural network structure -------'''
     def noteOnMsg(self, noteIn, timeIn):
         return mido.Message('note_on', note=noteIn, time=timeIn, channel=1)
-
-'''
-if __name__ == '__main__':
-    mid = mido.MidiFile('../MIDI/unchain.mid')
-    TICKS_PER_BEAT_STANDARD = 480
-    pp = ProcessMIDI()
-    t = pp.getGuitarTracks(mid)
-    track = pp.prepareMIDITrackForPreprocessing(t[0], mid.ticks_per_beat, TICKS_PER_BEAT_STANDARD) # If noteoff = noteon with 0 velocity, fix this and quantize track
-    #struct = pp.preprocessMIDITrack(track, mid.ticks_per_beat, TICKS_PER_BEAT_STANDARD)
-'''

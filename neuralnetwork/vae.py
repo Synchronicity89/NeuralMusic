@@ -22,6 +22,7 @@ from compare import Compare
 import math
 np.set_printoptions(threshold=np.nan)
 
+'''Variational autoencoder for generating blues solos'''
 
 class Normal(object):
     def __init__(self, mu, sigma, log_sigma, v=None, r=None):
@@ -73,20 +74,18 @@ class VAE(torch.nn.Module):
             return mu
 
     def forward(self, state, criterion, batch_size, input_dim, latent_dim, z_size, song_length):
+        '''Encode solo, sample the output from the latent dimension, run z through the upperlevel decoder, and decode one timestep at a time'''
+
         o_enc, h_enc = self.encoder(state)
         z = self._sample_latent(o_enc)
-        #z = z.view(batch_size, latent_dim, z_size) # Change the first 1 if more that one batch
         output = Variable(torch.zeros(batch_size, 1, input_dim))
         output = output.cuda() if self.use_cuda else output
         song = None
         temp_loss = None
-        #temp_hid = h_enc.squeeze(0)[-1].view(1, 1, input_dim)
-            #hidden = (temp_z, temp_z)
         z_out, hidden = self.upperleveldecoder(z)
         for i in range(0, song_length):
             zi = z.squeeze(0)[i].view(1, 1, latent_dim)
             output, hidden = self.decoder(output, hidden, zi)
-            #output, hidden = self.decoder(output, hidden)
             state_i = state.squeeze(0)[i].view(1, 1, input_dim)
             if song is None:
                 song = output
@@ -94,12 +93,13 @@ class VAE(torch.nn.Module):
             else:
                 song = torch.cat((song, output), dim=0)
                 temp_loss += criterion(output, state_i)
-            output = state_i  # test teacher forcing
+            output = state_i
             output = output.view(batch_size, 1, input_dim)
         return temp_loss/song_length, z
 
 
 def latent_loss(z_mean, z_stddev):
+    '''Calculate latent loss'''
     mean_sq = z_mean * z_mean
     stddev_sq = z_stddev * z_stddev
     return 0.5 * torch.mean(mean_sq + stddev_sq - torch.log(stddev_sq) - 1)
@@ -112,6 +112,7 @@ def loss_function(mu, logvar):
     return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
 
 def loadData(directory):
+    '''Load preprocessed text files of solos'''
     songdata = []
     i = 0
     with progressbar.ProgressBar(max_value=len(os.listdir(directory))) as bar:
@@ -122,9 +123,8 @@ def loadData(directory):
                 if (len(currentSong > 0)):
                     for timestep in currentSong:
                         if (len(np.nonzero(timestep)) > 0):
-                            if (np.nonzero(timestep)[0][0] != 128):
+                            if (np.nonzero(timestep)[0][0] != 128): #Removing pauses. Comment out if pauses should be kept.
                                 newSong.append(timestep)
-                    #currentSong = currentSong[0:song_length] # Making song shorter
                     newSong = np.array(newSong)
                     songdata.append(newSong)
                     i = i + 1
@@ -137,6 +137,7 @@ if __name__ == '__main__':
     use_cuda = torch.cuda.is_available()
     #torch.cuda.set_device(1)
     t0 = time.time()
+
     '''Input data config'''
     directory = 'bluessolodata'
     songdata = loadData(directory)
@@ -145,11 +146,13 @@ if __name__ == '__main__':
 
     dataloader = torch.utils.data.DataLoader(songdata, batch_size=batch_size,
                                              shuffle=False, num_workers=2)
-    hidden_size = 64 #usually 100
+    hidden_size = 64
     z_size = 1
     latent_dim = 30
 
     print('Number of samples: ', len(songdata))
+
+    '''Init VAE components'''
     encoder = Encoder(input_dim, hidden_size, hidden_size)
     upperleveldecoder = UpperLevelDecoder(latent_dim, hidden_size)
     decoder = Decoder(input_dim + latent_dim, hidden_size, input_dim) #It was (input_dim + latent_dim, latent_dim, input_dim)
@@ -161,15 +164,14 @@ if __name__ == '__main__':
         vae.cuda()
         criterion.cuda()
 
-    #optimizer = optim.Adam(vae.parameters(), lr=0.0005)
-    #optimizer = optim.Adam(vae.parameters(), lr=0.01)
-    learningRate = 0.01
-    learningRateTitle = 0.01
+
+    '''Training'''
+    learningRate = 0.005 #Actual learning rate
+    learningRateTitle = 0.005 #This is for the title of the generated MIDI file
     numEpochs = 100
     optimizer = optim.Adam(vae.parameters(), lr=learningRate)
     l = None
     songToProcess = None
-    lastZ = None
     losses = []
     for epoch in range(numEpochs):
         with progressbar.ProgressBar(max_value=len(dataloader)) as bar:
@@ -179,7 +181,6 @@ if __name__ == '__main__':
                     data = data.cuda()
                 inputs = Variable(data).float()
                 inputs = inputs.cuda() if use_cuda else inputs
-                #inputs = Variable(inputs.resize_(batch_size, input_dim))
                 optimizer.zero_grad()
                 loss, z = vae(inputs, criterion, batch_size, input_dim, latent_dim, z_size, song_length)
                 ll = latent_loss(vae.z_mean, vae.z_sigma)
@@ -188,7 +189,7 @@ if __name__ == '__main__':
                 optimizer.step()
                 l = loss.data[0]
                 bar.update(i)
-                songToProcess = data
+                songToProcess = data # If generating directly from encoder/decoder
         print(epoch, l)
         losses.append(l)
         learningRate = learningRate * math.exp(-0.01)
@@ -209,6 +210,7 @@ if __name__ == '__main__':
             song = torch.cat((song, output), dim=1)
         output = output.view(batch_size, 1, 130)'''
 
+    '''Create three random samples and append to a list of samples'''
     samples = []
     compareItems = []
     song_length = 256
@@ -221,11 +223,8 @@ if __name__ == '__main__':
     samples.append(s)
     samples.append(s1)
     samples.append(s2)
-    #s = vae.encoder(Variable(torch.randn(1, 128, 130)))
-    #sample = vae._sample_latent(s)
-    #sample = sample.view(1, 1, 128)
 
-
+    '''Decode all samples'''
     for number, sample in enumerate(samples):
         song = None
         output = Variable(torch.zeros(batch_size, 1, 130))
@@ -239,16 +238,12 @@ if __name__ == '__main__':
             else:
                 song = torch.cat((song, output), dim=1)
             output = output.view(batch_size, 1, 130)
-        #print(song)
-        #output = song.view(1, 128, 130)
 
         output = song.squeeze(0)
         song = None
         prevNote = None
         limit = 16
         for data in output:
-            #value, index = torch.max(data, 0) This is highest probability
-            #index = index.data[0]
             '''Highest probability'''
             b = np.zeros(shape=(1, 130))
             values, indices = data.max(0)
@@ -288,7 +283,6 @@ if __name__ == '__main__':
         print(song)
         compareItems.append(song)
         rec = recreate.RecreateMIDI()
-        #print(song)
         track = rec.recreateMIDI(song, 30)
         rec.createMIDITest(track, 'Recreated '+str(number) + ', ' + str(numEpochs) + ' epochs,' + ' learning rate = '+str(learningRateTitle))
     print('Runtime: ' + str(t1-t0) + " seconds")
@@ -299,5 +293,5 @@ if __name__ == '__main__':
     for song in compareItems:
         comparator.compareData(songdata, song, file)
         file.write('\n')
-        file.write(str(losses) + '\n\n')
+    file.write('\n' + str(losses))
     file.close()
